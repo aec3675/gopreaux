@@ -8,8 +8,23 @@ Time-domain astronomy is entering a golden age of discovery, powered by wide-fie
 
 `GOPREAUX` addresses these problems by producing multidimensional template light curve and spectral surfaces of different classes of transients for the first time. `GOPREAUX` models aggregated archival data, spanning the ultraviolet to the infrared, using Gaussian Process Regression across both phase and wavelength simultaneously. The models produce "template" time-evolving spectral energy distribution surfaces that can be used for a variety of use cases--to perform physical parameter inference, generate machine learning training sets of different transients at arbitrary phase and redshift, or identify rare and unusual transients in real time, to name a few use cases. 
 
-## Install
-Dependencies are managed using `poetry`. The recommended installation is to create a new python environment for this repo and install `poetry` within that environment. Then dependencies can be installed as easily as running `poetry install`.
+## Installation and Setup
+Dependencies are managed using `poetry`. The recommended installation is to create a new python environment for this repo and install `poetry` within that environment. Poetry can then be used to install the dependencies:
+
+```
+> conda create -n gopreaux python=3.10
+> conda activate gopreaux
+> pip install poetry
+> poetry install
+```
+Finally, to make use of Milky Way extinction correction, the dust map files of Schlafly and Finkbeiner (2011) must be fetched and saved locally. To do so, open a Python shell and run:
+
+```py
+import dustmaps.sfd
+
+dustmaps.sfd.fetch()
+```
+That's it! `gopreaux` should now be ready to use.
 
 ## Data Structure
 ```mermaid
