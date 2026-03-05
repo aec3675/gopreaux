@@ -7,7 +7,7 @@
 gopreaux 
 ======================
 
-.. include:: ../README.md
+.. include:: readme.rst
 
 .. toctree::
    :maxdepth: 3
