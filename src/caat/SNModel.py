@@ -356,6 +356,7 @@ class SNModel:
             # Only one object in our sample, so load it as a SN object
             self.sn = SN(name=object_names)
             self.collection = None
+            self._initialize_surface_fit()
         else:
             self.collection = SNCollection(names=object_names.split(","))
             self.sn = None
@@ -396,9 +397,6 @@ class SNModel:
             raise ValueError("Phases need to be within the bounds of the GP")
         if wavelength < self.min_wl or wavelength > self.max_wl:
             raise ValueError("Wavelength needs to be within the bounds of the GP")
-        
-        if self.sn is not None:
-            self._initialize_surface_fit()
 
         linear_phases = np.linspace(
             phase_min,
@@ -471,9 +469,6 @@ class SNModel:
             raise ValueError("Wavelengths need to be within the bounds of the GP")
         if phase < self.min_phase or phase > self.max_phase:
             raise ValueError("Phase needs to be within the bounds of the GP")
-        
-        if self.sn is not None:
-            self._initialize_surface_fit()
 
         linear_waves = np.linspace(
             wavelength_min,
@@ -550,9 +545,6 @@ class SNModel:
             raise ValueError("Wavelengths need to be within the bounds of the GP")
         if any(phases < self.min_phase) or any(phases > self.max_phase):
             raise ValueError("Phase needs to be within the bounds of the GP")
-        
-        if self.sn is not None:
-            self._initialize_surface_fit()
 
         log_phases = np.log(phases + self.log_transform)
         log_waves = np.log10(wavelengths)
@@ -657,10 +649,6 @@ class SNModel:
                 for the fit. If 1, plots the usual GP prediction with error bars
                 If >1, plots nsamples of randomly drawn GP fits. Defaults to 1.
         """
-
-        if self.sn is not None:
-            self._initialize_surface_fit()
-
         if isinstance(photometry, dict):
             try:
                 photometry = pd.DataFrame(photometry)
