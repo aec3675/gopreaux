@@ -157,6 +157,7 @@ class SNModel:
 
             if sn:
                 self.sn = sn
+                self._initialize_surface_fit()
             if sncollection:
                 self.collection = sncollection
             if norm_set:
@@ -198,6 +199,53 @@ class SNModel:
             self.filters = filters_fit
 
             self.log_transform = log_transform
+
+    def _initialize_surface_fit(self):
+        """
+        Initialize the Surface model by fitting the photometry that
+        was used to create the model.
+        This is necessary to produce sensible predictions for models
+        that fit individual SN ojects.
+        """
+        data_cube_filename = os.path.join(
+            self.sn.base_path,
+            self.sn.classification,
+            self.sn.subtype,
+            self.sn.name,
+            self.sn.name + "_datacube_mangled.csv",
+        )
+
+        if os.path.exists(data_cube_filename):
+            cube = pd.read_csv(data_cube_filename)
+
+            filtered_df = cube[
+                (
+                    cube["Phase"] > self.min_phase
+                ) & (
+                    cube["Phase"] < self.max_phase
+                ) & (
+                    cube["ShiftedWavelength"] > self.min_wl
+                ) & (
+                    cube["ShiftedWavelength"] < self.max_wl
+                )
+            ]
+
+            phases_to_fit = filtered_df["Phase"].values
+            wls_to_fit = filtered_df["ShiftedWavelength"].values
+            shifted_mags = filtered_df["ShiftedFlux"].values
+            residuals = []
+
+            for phase, wl, mag in zip(phases_to_fit, wls_to_fit, shifted_mags):
+                phase_ind = np.argmin(abs(phase - self.phase_grid))
+                wl_ind = np.argmin(abs(wl - self.wl_grid))
+
+                residuals.append(mag - self.template[phase_ind, wl_ind])
+
+        x = np.vstack((np.log(phases_to_fit + self.log_transform), np.log10(wls_to_fit))).T
+        y = residuals
+        # TODO: Use actual errors here:
+        self.surface.alpha = np.asarray(np.ones((len(residuals),))*0.1)
+        self.surface.fit(x, y)
 
     def save_fits(self, filename: str = None, force: bool = False):
         """
@@ -307,8 +355,10 @@ class SNModel:
         if "," not in object_names:
             # Only one object in our sample, so load it as a SN object
             self.sn = SN(name=object_names)
+            self.collection = None
         else:
             self.collection = SNCollection(names=object_names.split(","))
+            self.sn = None
 
         self.norm_set = SNCollection(names=norm_set_names.split(","))
 
@@ -346,6 +396,9 @@ class SNModel:
             raise ValueError("Phases need to be within the bounds of the GP")
         if wavelength < self.min_wl or wavelength > self.max_wl:
             raise ValueError("Wavelength needs to be within the bounds of the GP")
+        
+        if self.sn is not None:
+            self._initialize_surface_fit()
 
         linear_phases = np.linspace(
             phase_min,
@@ -418,6 +471,9 @@ class SNModel:
             raise ValueError("Wavelengths need to be within the bounds of the GP")
         if phase < self.min_phase or phase > self.max_phase:
             raise ValueError("Phase needs to be within the bounds of the GP")
+        
+        if self.sn is not None:
+            self._initialize_surface_fit()
 
         linear_waves = np.linspace(
             wavelength_min,
@@ -494,6 +550,9 @@ class SNModel:
             raise ValueError("Wavelengths need to be within the bounds of the GP")
         if any(phases < self.min_phase) or any(phases > self.max_phase):
             raise ValueError("Phase needs to be within the bounds of the GP")
+        
+        if self.sn is not None:
+            self._initialize_surface_fit()
 
         log_phases = np.log(phases + self.log_transform)
         log_waves = np.log10(wavelengths)
@@ -598,6 +657,9 @@ class SNModel:
                 for the fit. If 1, plots the usual GP prediction with error bars
                 If >1, plots nsamples of randomly drawn GP fits. Defaults to 1.
         """
+
+        if self.sn is not None:
+            self._initialize_surface_fit()
 
         if isinstance(photometry, dict):
             try:

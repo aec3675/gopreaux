@@ -1145,6 +1145,7 @@ class GP3D(GP):
         subtract_polynomial=False,
         interactive=False,
         run_diagnostics=False,
+        save_individual_fits=False,
     ):
         """
         Run the Gaussian Process Regression fitting routine on each transient
@@ -1165,6 +1166,9 @@ class GP3D(GP):
                 as well. Defaults to False.
             run_diagnostics (bool, optional): Run diagnostic tests on the fitting to identify
                 data points or regions of poor fit quality. Defaults to False.
+            save_individual_fits (bool, optional): Save the GP fits to each individual
+                SN object separately. If True, will save the models to the default location.
+                WARNING: This can be a lot of data. Defualts to False.
 
         Raises:
             Exception: Must toggle either subtract_median or subtract_polynomial as True
@@ -1525,6 +1529,19 @@ class GP3D(GP):
                     for i in range(round(np.log(len(residuals)))):
                         random_sample = self._sample_predicted_sed(gp_grid, gp_grid_std)
                         gaussian_processes.append(random_sample)
+
+                if save_individual_fits:
+                    snmodel = SNModel(
+                        surface=gaussian_process,
+                        template_mags=template_mags.T,
+                        phase_grid=np.exp(phase_grid[phase_inds_fitted]) - self.log_transform,
+                        wl_grid=10**(wl_grid[wl_inds_fitted]),
+                        filters_fit=filts_fitted,
+                        sn=sn,
+                        norm_set=self.set_to_normalize,
+                        log_transform=self.log_transform,
+                    )
+                    snmodel.save_fits()
 
         return gaussian_processes, mag_grid, phase_grid, wl_grid
 
