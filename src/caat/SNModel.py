@@ -155,18 +155,6 @@ class SNModel:
                     "Need to specify either a SN or SNCollection for this model!"
                 )
 
-            if sn:
-                self.sn = sn
-                self._initialize_surface_fit()
-            if sncollection:
-                self.collection = sncollection
-            if norm_set:
-                self.norm_set = norm_set
-
-            self.surface = surface
-            self.kernel = surface.kernel
-            self.template = template_mags
-
             if (
                 phase_grid is None
                 and phase_bounds is not None
@@ -182,7 +170,7 @@ class SNModel:
                     int(min(phase_grid)),
                     int(max(phase_grid)),
                 )
-
+            
             if (
                 wl_grid is None
                 and filters_fit is not None
@@ -200,6 +188,18 @@ class SNModel:
 
             self.log_transform = log_transform
 
+            self.surface = surface
+            self.kernel = surface.kernel
+            self.template = template_mags
+
+            if sn:
+                self.sn = sn
+                self._initialize_surface_fit()
+            if sncollection:
+                self.collection = sncollection
+            if norm_set:
+                self.norm_set = norm_set
+            
     def _initialize_surface_fit(self):
         """
         Initialize the Surface model by fitting the photometry that
@@ -544,6 +544,7 @@ class SNModel:
         if any(wavelengths > max(self.wl_grid)) or any(wavelengths < min(self.wl_grid)):
             raise ValueError("Wavelengths need to be within the bounds of the GP")
         if any(phases < self.min_phase) or any(phases > self.max_phase):
+            # print(f"min allowable phase={self.min_phase}, max allowable phase={self.max_phase}")
             raise ValueError("Phase needs to be within the bounds of the GP")
 
         log_phases = np.log(phases + self.log_transform)
@@ -556,7 +557,7 @@ class SNModel:
         # For each predicted point, define a Gaussian distribution with uncertainty=dev and sample from it
         prediction = []
         for i in range(len(predicted_lc)):
-            prediction.append(np.random.normal(predicted_lc[i], dev[i], 1)[0])
+            prediction.append(np.random.normal(predicted_lc[i], abs(dev[i]), 1)[0])
         prediction = np.asarray(prediction)
 
         # Add back on template mag for the correct phase and wavelength inds
@@ -570,14 +571,29 @@ class SNModel:
 
         else:
             template_lc = np.zeros(len(prediction))
-
-        plt.errorbar(
-            phases,
-            prediction + template_lc,
-            yerr=dev,
-            fmt="o",
-            color=kwargs.get("color", "k"),
-        )
+        if len(np.unique(wavelengths))>1:
+            plt.errorbar(
+                phases[:int(len(phases)/2)],
+                prediction[:int(len(phases)/2)] + template_lc[:int(len(phases)/2)],
+                yerr=abs(dev[:int(len(phases)/2)]),
+                fmt="o",
+                color=kwargs.get("color", "green"),
+            )
+            plt.errorbar(
+                phases[int(len(phases)/2):],
+                prediction[int(len(phases)/2):] + template_lc[int(len(phases)/2):],
+                yerr=abs(dev[int(len(phases)/2):]),
+                fmt="o",
+                color=kwargs.get("color", "red"),
+            )
+        else:
+            plt.errorbar(
+                phases,
+                prediction + template_lc,
+                yerr=abs(dev),
+                fmt="o",
+                # color=kwargs.get("color", "k"),
+            )
         plt.xlabel("Phase (days)")
         plt.ylabel("Log10(Flux) Relative to Peak")
         plt.title("Predicted Photometry Points")
@@ -631,6 +647,7 @@ class SNModel:
         phase_max: float | None = None,
         show: bool = False,
         nsamples: int = 1,
+        save4adrian: bool = False,
     ):
         """
         Fit input photometry using the GaussianProcessRegressor model.
@@ -739,8 +756,9 @@ class SNModel:
 
             ### To convert to normalized magnitudes, pass in a fake SN object
             ### with bogus peak info (the peak info doesn't matter, we just need it to convert)
-            sn = SN(data={})
-            sn.info = {"peak_filt": "V", "peak_mag": 17}
+            # sn = SN(data={})
+            # sn.info = {"peak_filt": "V", "peak_mag": 17}
+            sn = self.sn
 
             if nsamples == 1:
                 residuals_for_filt["Phase"] = np.log(
@@ -759,14 +777,14 @@ class SNModel:
                     sn=sn,
                 )
             else:
-                for sample in samples.T:
+                for i,sample in enumerate(samples.T):
                     log_fluxes = sample + template_mags
                     shifted_mags = convert_shifted_fluxes_to_shifted_mags(
                         log_fluxes, sn, sn.zps[filt]
                     )
 
                     ax.plot(
-                        test_times, shifted_mags, color=colors.get(filt, "k"), alpha=0.2
+                        test_times, shifted_mags, color=colors.get(filt, "k"), alpha=0.2, 
                     )
                     ax.errorbar(
                         residuals_for_filt["Phase"].values,
@@ -775,7 +793,30 @@ class SNModel:
                         fmt="o",
                         color=colors.get(filt, "k"),
                         mec="k",
+                        label=filt,
                     )
+
+                    handles, labels = ax.get_legend_handles_labels()
+                    
+                    ax.legend(handles[::nsamples], labels[::nsamples])
+                    ax.set_xlabel("Normalized Time [days]")
+                    ax.set_ylabel("Flux Relative to Peak")
+                    ax.set_title(sn)
+
+                    if save4adrian:
+                        print(np.shape(template_mags))
+                        # snmodel = SNModel(
+                        #     surface=gp,
+                        #     template_mags=template_mags,
+                        #     phase_grid=self.phase_grid, #np.exp(self.phase_grid) - self.log_transform,
+                        #     wl_grid=self.wl_grid, #10**(self.wl_grid),
+                        #     filters_fit=list(set(photometry["Filter"].values)),
+                        #     sn=sn,
+                        #     norm_set=self.norm_set,
+                        #     log_transform=self.log_transform,
+                        # )
+                        # filename = f"{sn}_GP_model_{i}.fits"
+                        # snmodel.save_fits(filename=filename)
 
         if show:
             plt.show()
