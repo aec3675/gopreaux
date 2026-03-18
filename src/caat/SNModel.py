@@ -9,6 +9,7 @@ from astropy.io import fits
 from scipy.interpolate import RegularGridInterpolator
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel
+from itertools import chain
 
 from caat.utils import ROOT_DIR, WLE, colors, convert_shifted_fluxes_to_shifted_mags
 
@@ -111,6 +112,7 @@ class SNModel:
         sncollection: SNType | SNCollection | None = None,
         norm_set: SNType | SNCollection | None = None,
         log_transform: int | float | bool = False,
+        base_path: str | None = None,
     ):
         """
         Initialize an SNModel object from a number of arguments.
@@ -143,7 +145,10 @@ class SNModel:
             ValueError: Must initialize an SNModel object by passing in either
                 an SN or SNCollection, to which this model belongs.
         """
-        self.base_path = os.path.join(ROOT_DIR, "data/final_models/")
+        if base_path is None:
+            self.base_path = os.path.join(ROOT_DIR, "data/final_models/")
+        else:
+            self.base_path = os.path.join(ROOT_DIR, base_path)
 
         if type(surface) == str:
             ### This will load everything from the fits file
@@ -648,6 +653,8 @@ class SNModel:
         show: bool = False,
         nsamples: int = 1,
         save4adrian: bool = False,
+        savedir: str | None = None,
+        overwrite: bool = False,
     ):
         """
         Fit input photometry using the GaussianProcessRegressor model.
@@ -666,6 +673,7 @@ class SNModel:
                 for the fit. If 1, plots the usual GP prediction with error bars
                 If >1, plots nsamples of randomly drawn GP fits. Defaults to 1.
         """
+        
         if isinstance(photometry, dict):
             try:
                 photometry = pd.DataFrame(photometry)
@@ -688,10 +696,7 @@ class SNModel:
 
             if len(phases) > 0:
                 for i, phase in enumerate(phases):
-                    ### Get index of current phase in phase grid
-                    ### The phase corresponding to phase_ind is no more than the phase grid spacing away from the true phase being measured
                     phase_ind = np.argmin(abs(self.phase_grid - phase))
-
                     wl_ind = np.argmin(abs(self.wl_grid - current_wls[i]))
 
                     if not np.isnan(self.template[phase_ind, wl_ind]) and not np.isinf(
@@ -702,8 +707,7 @@ class SNModel:
                                 "Filter": filt,
                                 "Phase": phase,
                                 "Wavelength": current_wls[i],
-                                "MagResidual": mags[i]
-                                - self.template[phase_ind, wl_ind],
+                                "MagResidual": mags[i] - self.template[phase_ind, wl_ind],
                                 "MagErr": errs[i],
                                 "Mag": mags[i],
                             }
@@ -722,6 +726,8 @@ class SNModel:
 
         gp = GaussianProcessRegressor(kernel=self.kernel, alpha=err, optimizer=None)
         gp.fit(x, y)
+        # gp = self.surface
+        # gp.fit(x,y)
 
         ### Predict lightcurves given the GP fit
         if not phase_min:
@@ -729,38 +735,28 @@ class SNModel:
         if not phase_max:
             phase_max = max(residuals["Phase"].values)
 
+        sn = self.sn
         _, ax = plt.subplots()
-        for filt in list(set(residuals["Filter"].values)):
-            test_times_linear = np.arange(phase_min, phase_max, 1.0 / 24)
-            test_times = np.log(test_times_linear - phase_min + 0.1)
-            test_waves = np.ones(len(test_times)) * np.log10(WLE[filt])
 
-            wl_ind = np.argmin(abs(self.wl_grid - WLE[filt]))
-            template_mags = []
-            for i in range(len(test_times_linear)):
-                j = np.argmin(abs(self.phase_grid - test_times_linear[i]))
-                template_mags.append(self.template[j, wl_ind])
-            template_mags = np.asarray(template_mags)
+        if nsamples == 1:
+            for filt in list(set(residuals["Filter"].values)):
+                test_times_linear = np.arange(phase_min, phase_max, 1.0 / 24)
+                test_times = np.log(test_times_linear - phase_min + 0.1)
+                test_waves = np.ones(len(test_times)) * np.log10(WLE[filt])
 
-            if nsamples == 1:
+                wl_ind = np.argmin(abs(self.wl_grid - WLE[filt]))
+                template_mags = []
+                for i in range(len(test_times_linear)):
+                    j = np.argmin(abs(self.phase_grid - test_times_linear[i]))
+                    template_mags.append(self.template[j, wl_ind])
+                template_mags = np.asarray(template_mags)
+
                 test_prediction, std_prediction = gp.predict(
                     np.vstack((test_times, test_waves)).T, return_std=True
                 )
-            elif nsamples > 1:
-                samples = gp.sample_y(
-                    np.vstack((test_times, test_waves)).T, n_samples=nsamples
-                )
 
-            test_times = np.exp(test_times) + phase_min - 0.1
-            residuals_for_filt = residuals[residuals["Filter"] == filt]
-
-            ### To convert to normalized magnitudes, pass in a fake SN object
-            ### with bogus peak info (the peak info doesn't matter, we just need it to convert)
-            # sn = SN(data={})
-            # sn.info = {"peak_filt": "V", "peak_mag": 17}
-            sn = self.sn
-
-            if nsamples == 1:
+                test_times = np.exp(test_times) + phase_min - 0.1
+                residuals_for_filt = residuals[residuals["Filter"] == filt].copy()
                 residuals_for_filt["Phase"] = np.log(
                     residuals_for_filt["Phase"].values + self.log_transform
                 )
@@ -776,47 +772,231 @@ class SNModel:
                     filt=filt,
                     sn=sn,
                 )
-            else:
-                for i,sample in enumerate(samples.T):
-                    log_fluxes = sample + template_mags
+        else:
+            if save4adrian:
+                time, flux, filts, sample = [],[],[],[]
+            for i in range(nsamples):
+                for filt in list(set(residuals["Filter"].values)):
+                    test_times_linear = np.arange(phase_min, phase_max, 1.0 / 24)
+                    test_times = np.log(test_times_linear - phase_min + 0.1)
+                    test_waves = np.ones(len(test_times)) * np.log10(WLE[filt])
+
+                    wl_ind = np.argmin(abs(self.wl_grid - WLE[filt]))
+                    template_mags = []
+                    for j in range(len(test_times_linear)):
+                        k = np.argmin(abs(self.phase_grid - test_times_linear[j]))
+                        template_mags.append(self.template[k, wl_ind])
+                    template_mags = np.asarray(template_mags)
+
+                    samples_filt = gp.sample_y(
+                        np.vstack((test_times, test_waves)).T, n_samples=nsamples
+                    )
+                    sample_filt = samples_filt.T[i]
+
+                    log_fluxes = sample_filt + template_mags
                     shifted_mags = convert_shifted_fluxes_to_shifted_mags(
                         log_fluxes, sn, sn.zps[filt]
                     )
 
                     ax.plot(
-                        test_times, shifted_mags, color=colors.get(filt, "k"), alpha=0.2, 
+                        np.exp(test_times) + phase_min - 0.1,
+                        shifted_mags,
+                        color=colors.get(filt, "k"),
+                        alpha=0.2,
                     )
                     ax.errorbar(
-                        residuals_for_filt["Phase"].values,
-                        residuals_for_filt["Mag"].values,
-                        yerr=residuals_for_filt["MagErr"].values,
+                        residuals[residuals["Filter"] == filt]["Phase"].values,
+                        residuals[residuals["Filter"] == filt]["Mag"].values,
+                        yerr=residuals[residuals["Filter"] == filt]["MagErr"].values,
                         fmt="o",
                         color=colors.get(filt, "k"),
                         mec="k",
                         label=filt,
                     )
 
-                    handles, labels = ax.get_legend_handles_labels()
-                    
-                    ax.legend(handles[::nsamples], labels[::nsamples])
-                    ax.set_xlabel("Normalized Time [days]")
-                    ax.set_ylabel("Flux Relative to Peak")
-                    ax.set_title(sn)
-
                     if save4adrian:
-                        print(np.shape(template_mags))
-                        # snmodel = SNModel(
-                        #     surface=gp,
-                        #     template_mags=template_mags,
-                        #     phase_grid=self.phase_grid, #np.exp(self.phase_grid) - self.log_transform,
-                        #     wl_grid=self.wl_grid, #10**(self.wl_grid),
-                        #     filters_fit=list(set(photometry["Filter"].values)),
-                        #     sn=sn,
-                        #     norm_set=self.norm_set,
-                        #     log_transform=self.log_transform,
-                        # )
-                        # filename = f"{sn}_GP_model_{i}.fits"
-                        # snmodel.save_fits(filename=filename)
+                        x = list(np.exp(test_times) + phase_min - 0.1)
+                        y = list(shifted_mags)
+                        f = [filt]*len(x)
+                        s = [i]*len(x)
+                        time.append(x)
+                        flux.append(y)
+                        filts.append(f)
+                        sample.append(s)
+
+                handles, labels = ax.get_legend_handles_labels()
+                by_label = dict(zip(labels, handles))
+                ax.legend(by_label.values(), by_label.keys())
+                ax.set_xlabel("Normalized Time [days]")
+                ax.set_ylabel("Flux Relative to Peak")
+                ax.set_title(sn)
+
+            if save4adrian:
+                if savedir is not None:
+                    times = list(chain.from_iterable(time))
+                    fluxs = list(chain.from_iterable(flux))
+                    filtss = list(chain.from_iterable(filts))
+                    samples = list(chain.from_iterable(sample))
+
+                    lc_df = pd.DataFrame({'time':times, 'flux':fluxs, 'filt':filtss, 'sample':samples})
+
+                    os.makedirs(savedir, exist_ok=True)
+                    filename = f"{self.sn.name}_GP_model.csv"
+                    lc_df.to_csv(savedir+filename, index=False)
 
         if show:
             plt.show()
+###################
+        # if isinstance(photometry, dict):
+        #     try:
+        #         photometry = pd.DataFrame(photometry)
+        #     except Exception as e:
+        #         raise ValueError(
+        #             "Either provide photometry as a DataFrame or in a valid dictionary",
+        #             e,
+        #         )
+
+        # if nsamples < 1:
+        #     raise ValueError("Number of samples must be >= 1")
+
+        # ### Get residuals for the photometry from the saved template grid
+        # residuals = []
+        # for filt in list(set(photometry["Filter"].values)):
+        #     mags = photometry.loc[photometry["Filter"] == filt]["Mag"].values
+        #     errs = photometry.loc[photometry["Filter"] == filt]["MagErr"].values
+        #     phases = photometry.loc[photometry["Filter"] == filt]["Phase"].values
+        #     current_wls = np.ones(len(phases)) * WLE[filt]
+
+        #     if len(phases) > 0:
+        #         for i, phase in enumerate(phases):
+        #             ### Get index of current phase in phase grid
+        #             ### The phase corresponding to phase_ind is no more than the phase grid spacing away from the true phase being measured
+        #             phase_ind = np.argmin(abs(self.phase_grid - phase))
+
+        #             wl_ind = np.argmin(abs(self.wl_grid - current_wls[i]))
+
+        #             if not np.isnan(self.template[phase_ind, wl_ind]) and not np.isinf(
+        #                 mags[i] - self.template[phase_ind, wl_ind]
+        #             ):
+        #                 residuals.append(
+        #                     {
+        #                         "Filter": filt,
+        #                         "Phase": phase,
+        #                         "Wavelength": current_wls[i],
+        #                         "MagResidual": mags[i]
+        #                         - self.template[phase_ind, wl_ind],
+        #                         "MagErr": errs[i],
+        #                         "Mag": mags[i],
+        #                     }
+        #                 )
+        # residuals = pd.DataFrame(residuals)
+        # if len(residuals) == 0:
+        #     raise ValueError("Photometry not within bounds of this GP")
+
+        # ### Fit the photometry with the GP model
+        # phases_to_fit = np.log(
+        #     residuals["Phase"].values - min(residuals["Phase"].values) + 0.1
+        # )
+        # x = np.vstack((phases_to_fit, np.log10(residuals["Wavelength"].values))).T
+        # y = residuals["MagResidual"].values
+        # err = residuals["MagErr"].values
+
+        # gp = GaussianProcessRegressor(kernel=self.kernel, alpha=err, optimizer=None)
+        # gp.fit(x, y)
+
+        # ### Predict lightcurves given the GP fit
+        # if not phase_min:
+        #     phase_min = min(residuals["Phase"].values)
+        # if not phase_max:
+        #     phase_max = max(residuals["Phase"].values)
+
+        # _, ax = plt.subplots()
+        # for filt in list(set(residuals["Filter"].values)):
+        #     test_times_linear = np.arange(phase_min, phase_max, 1.0 / 24)
+        #     test_times = np.log(test_times_linear - phase_min + 0.1)
+        #     test_waves = np.ones(len(test_times)) * np.log10(WLE[filt])
+
+        #     wl_ind = np.argmin(abs(self.wl_grid - WLE[filt]))
+        #     template_mags = []
+        #     for i in range(len(test_times_linear)):
+        #         j = np.argmin(abs(self.phase_grid - test_times_linear[i]))
+        #         template_mags.append(self.template[j, wl_ind])
+        #     template_mags = np.asarray(template_mags)
+
+        #     if nsamples == 1:
+        #         test_prediction, std_prediction = gp.predict(
+        #             np.vstack((test_times, test_waves)).T, return_std=True
+        #         )
+        #     elif nsamples > 1:
+        #         samples = gp.sample_y(
+        #             np.vstack((test_times, test_waves)).T, n_samples=nsamples
+        #         )
+
+        #     test_times = np.exp(test_times) + phase_min - 0.1
+        #     residuals_for_filt = residuals[residuals["Filter"] == filt]
+
+        #     ### To convert to normalized magnitudes, pass in a fake SN object
+        #     ### with bogus peak info (the peak info doesn't matter, we just need it to convert)
+        #     # sn = SN(data={})
+        #     # sn.info = {"peak_filt": "V", "peak_mag": 17}
+        #     sn = self.sn
+
+        #     if nsamples == 1:
+        #         residuals_for_filt["Phase"] = np.log(
+        #             residuals_for_filt["Phase"].values + self.log_transform
+        #         )
+
+        #         Plot().plot_run_gp_overlay(
+        #             ax=ax,
+        #             test_times=test_times,
+        #             test_prediction=test_prediction,
+        #             std_prediction=std_prediction,
+        #             template_mags=template_mags,
+        #             residuals=residuals_for_filt,
+        #             log_transform=self.log_transform,
+        #             filt=filt,
+        #             sn=sn,
+        #         )
+        #     else:
+        #         for i,sample in enumerate(samples.T):
+        #             log_fluxes = sample + template_mags
+        #             shifted_mags = convert_shifted_fluxes_to_shifted_mags(
+        #                 log_fluxes, sn, sn.zps[filt]
+        #             )
+
+        #             ax.plot(
+        #                 test_times, shifted_mags, color=colors.get(filt, "k"), alpha=0.2, 
+        #             )
+        #             ax.errorbar(
+        #                 residuals_for_filt["Phase"].values,
+        #                 residuals_for_filt["Mag"].values,
+        #                 yerr=residuals_for_filt["MagErr"].values,
+        #                 fmt="o",
+        #                 color=colors.get(filt, "k"),
+        #                 mec="k",
+        #                 label=filt,
+        #             )
+
+        #             handles, labels = ax.get_legend_handles_labels()
+                    
+        #             ax.legend(handles[::nsamples], labels[::nsamples])
+        #             ax.set_xlabel("Normalized Time [days]")
+        #             ax.set_ylabel("Flux Relative to Peak")
+        #             ax.set_title(sn)
+
+        #             if save4adrian:
+        #                 snmodel = SNModel(
+        #                     surface=gp,
+        #                     template_mags=self.template,
+        #                     phase_grid=self.phase_grid, 
+        #                     wl_grid=self.wl_grid, 
+        #                     filters_fit=list(set(photometry["Filter"].values)),
+        #                     sn=sn,
+        #                     norm_set=self.norm_set,
+        #                     log_transform=self.log_transform,
+        #                 )
+        #                 filename = f"{sn}_GP_model_{i}.fits"
+        #                 snmodel.save_fits(filename=filename)
+
+        # if show:
+        #     plt.show()
