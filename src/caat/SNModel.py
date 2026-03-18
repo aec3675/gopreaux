@@ -735,7 +735,7 @@ class SNModel:
         if not phase_max:
             phase_max = max(residuals["Phase"].values)
 
-        sn = self.sn
+        sn = self.sn #TODO bug
         _, ax = plt.subplots()
 
         if nsamples == 1:
@@ -795,7 +795,7 @@ class SNModel:
 
                     log_fluxes = sample_filt + template_mags
                     shifted_mags = convert_shifted_fluxes_to_shifted_mags(
-                        log_fluxes, sn, sn.zps[filt]
+                        log_fluxes, sn, sn.zps[filt] #TODO bug
                     )
 
                     ax.plot(

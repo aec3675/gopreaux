@@ -39,7 +39,7 @@ def inspect_gp(foldername):
                 data = pd.read_csv(f'../data/SESNe/SNIIb/{sn}/{sn}_datacube_mangled.csv')
                 datadf = data.loc[(data['Nondetection']==False)&((data['Filter']=='g')|(data['Filter']=='r'))&
                                 (data['Phase']>-20)&(data['Phase']<50),
-                                ['Phase', 'Filter', 'ShiftedFlux', 'ShiftedFluxerr']]
+                                ['Phase', 'Filter', 'ShiftedFlux', 'ShiftedFluxerr']] #TODO change to mag
                     #changing df column names to match expected names of fit_photometry function
                 datadf.rename(columns={'ShiftedFluxerr': 'MagErr'}, inplace=True)
                 datadf.rename(columns={'ShiftedFlux': 'Mag'}, inplace=True)
