@@ -145,7 +145,7 @@ class SNModel:
         """
         self.base_path = os.path.join(ROOT_DIR, "data/final_models/")
 
-        if type(surface) == str:
+        if isinstance(surface, str):
             ### This will load everything from the fits file
             self.load_from_fits(surface)
 
@@ -626,7 +626,8 @@ class SNModel:
 
     def fit_photometry(
         self,
-        sn_to_fit: SN,
+        sn_to_fit: SN | None = None,
+        photometry: dict | pd.DataFrame = None,
         filters_to_fit: list | None = None,
         phase_min: float | None = None,
         phase_max: float | None = None,
@@ -638,7 +639,16 @@ class SNModel:
         If a phase min or phase max is specified, extrapolates the fit to those bounds.
 
         Args:
-            sn_to_fit (SN): The SN containing the photometry to fit.
+            sn_to_fit (SN, optional): A SN object containing the photometry to fit.
+                Defaults to None.
+            photometry (dict | pd.DataFrame, optional): The input photometry
+                to fit, if one does not specify a `sn_to_fit`. Must be a dict or
+                DataFrame that contains these columns: Filter, Phase, Mag, and MagErr,
+                where "Mag" values are calculated relative to the light curve peak.
+                For example passing in a "Mag" value of -2.0 means that point is
+                2 magnitudes fainter than the light curve peak, a.k.a
+                "Mag" = peak_mag - each_observed_mag.
+                Defaults to None.
             filters_to_fit (list, optional): The filters to fit. If none
                 are provided, all filters will be fit. Defaults to None.
             phase_min (float, optional): The minimum phase to constrain our
@@ -650,6 +660,24 @@ class SNModel:
                 for the fit. If 1, plots the usual GP prediction with error bars
                 If >1, plots nsamples of randomly drawn GP fits. Defaults to 1.
         """
+        if sn_to_fit is None and photometry is None:
+            raise ValueError("Must specify either a SN object to fit or provide photometry to fit.")
+        
+        if sn_to_fit is not None and photometry is not None:
+            logger.warning(
+                "Both a sn_to_fit and a photometry object were passed in. "
+                "Defaulting to fit the SN object."
+            )
+        
+        if isinstance(photometry, dict):
+            try:
+                photometry = pd.DataFrame(photometry)
+            except Exception as e:
+                raise ValueError(
+                    "Either provide photometry as a DataFrame or in a valid dictionary",
+                    e,
+                )
+
         if (
             phase_min is not None and phase_min < self.min_phase
         ) or (
@@ -662,43 +690,92 @@ class SNModel:
         if nsamples < 1:
             raise ValueError("Number of samples must be >= 1")
         
-        # Get SN datacube
-        data_cube_filename = os.path.join(
-            sn_to_fit.base_path,
-            sn_to_fit.classification,
-            sn_to_fit.subtype,
-            sn_to_fit.name,
-            sn_to_fit.name + "_datacube_mangled.csv",
-        )
-    
-        if os.path.exists(data_cube_filename):
-            cube = pd.read_csv(data_cube_filename)
-        else:
-            datacube = DataCube(sn=sn_to_fit)
-            datacube.construct_cube()
-            cube = datacube.cube
-
-        # Filter the cube to the phases and filters we want
         if phase_min is None:
             phase_min = self.min_phase
 
         if phase_max is None:
             phase_max = self.max_phase
         
-        filtered_cube = cube.loc[
-            (cube["Filter"].isin(filters_to_fit))
-            & (cube["Nondetection"] == False)
-            & (cube["Phase"] > phase_min)
-            & (cube["Phase"] < phase_max),
-            ["Mag", "ShiftedFilter", "ShiftedFlux", "ShiftedFluxerr", "ShiftedWavelength", "Phase"]
-        ]
-
-        try:
-            filtered_cube["MagFromPeak"] = sn_to_fit.info["peak_mag"] - filtered_cube["Mag"]
-        except:
-            raise ValueError("The input SN object must have peak info")
+        if sn_to_fit is not None:
+            # Get SN datacube
+            data_cube_filename = os.path.join(
+                sn_to_fit.base_path,
+                sn_to_fit.classification,
+                sn_to_fit.subtype,
+                sn_to_fit.name,
+                sn_to_fit.name + "_datacube_mangled.csv",
+            )
         
-        sn_to_fit.cube = filtered_cube
+            if os.path.exists(data_cube_filename):
+                cube = pd.read_csv(data_cube_filename)
+            else:
+                datacube = DataCube(sn=sn_to_fit)
+                datacube.construct_cube()
+                cube = datacube.cube
+
+            if filters_to_fit is None:
+                filters_to_fit = list(set(cube["Filter"].values))
+
+            # Filter the cube to the phases and filters we want
+            filtered_cube = cube.loc[
+                (cube["Filter"].isin(filters_to_fit))
+                & (cube["Nondetection"] == False)
+                & (cube["Phase"] > phase_min)
+                & (cube["Phase"] < phase_max),
+                ["Mag", "ShiftedFilter", "ShiftedFlux", "ShiftedFluxerr", "ShiftedWavelength", "Phase"]
+            ]
+
+            try:
+                filtered_cube["MagFromPeak"] = sn_to_fit.info["peak_mag"] - filtered_cube["Mag"]
+            except:
+                raise ValueError("The input SN object must have peak info")
+            
+            sn_to_fit.cube = filtered_cube
+
+        else:
+            # Change column names of photometry dataframe, initialize a mock SN object
+            type_to_fit = (
+                self.collection.type 
+                if self.collection is not None and hasattr(self.collection, "type")
+                else self.sn.classification if self.sn is not None
+                else self.collection.sne[0].classification
+            )
+            subtype_to_fit = (
+                self.collection.subtype 
+                if self.collection is not None and hasattr(self.collection, "subtype")
+                else self.sn.subtype if self.sn is not None
+                else self.collection.sne[0].subtype
+            )
+            sn_to_fit = SN(
+                name="My New Transient", 
+                type=type_to_fit,
+                subtype=subtype_to_fit,
+                data={}, 
+                info={"peak_mag": 109, "peak_filt": "V"}
+            )
+            
+            def calc_shifted_flux(row):
+                return np.log10(
+                    sn_to_fit.zps[row["Filter"]] * 1e-11 * 10 ** (-0.4 * (sn_to_fit.info["peak_mag"] - row["Mag"]))
+                ) - np.log10(
+                    sn_to_fit.zps[sn_to_fit.info["peak_filt"]]
+                    * 1e-11
+                    * 10 ** (-0.4 * sn_to_fit.info["peak_mag"])
+                )
+        
+            photometry["ShiftedFlux"] = photometry.apply(calc_shifted_flux, axis=1)
+            photometry["Wavelength"] = photometry.apply(lambda x: WLE[x["Filter"]], axis=1)
+            cube = photometry.rename(
+                columns={
+                    'Filter': 'ShiftedFilter',
+                    'Wavelength': 'ShiftedWavelength',
+                    'Mag': 'MagFromPeak',
+                    'MagErr': 'ShiftedFluxerr',
+                }
+            )
+            if filters_to_fit is None:
+                filters_to_fit = list(set(cube["ShiftedFilter"].values))
+            sn_to_fit.cube = cube
         
         # Get residuals of SN photometry and template
         residuals = []
@@ -818,6 +895,8 @@ class SNModel:
                         color=colors.get(filt, "k"),
                         mec="k",
                     )
+                ax.set_xlabel("Normalized Time [days]")
+                ax.set_ylabel("Flux Relative to Peak")
 
         if show:
             plt.show()
