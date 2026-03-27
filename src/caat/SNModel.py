@@ -633,6 +633,7 @@ class SNModel:
         phase_max: float | None = None,
         show: bool = False,
         nsamples: int = 1,
+        keep_new_fit: bool = False,
     ):
         """
         Fit photometry of an input SN using the GaussianProcessRegressor model.
@@ -659,6 +660,11 @@ class SNModel:
             nsamples (int, optional): Number of samples to draw from the GP
                 for the fit. If 1, plots the usual GP prediction with error bars
                 If >1, plots nsamples of randomly drawn GP fits. Defaults to 1.
+            keep_new_fit (bool, optional): Overwrite `self.surface` with the new GPR
+                fit generated from the input photometry. If set to True, this allows 
+                class-based functionality (e.g., predict_lightcurve) to use the newly
+                generated fit. Note that this does not overwrite any of the fit information
+                that is saved to disk. Defaults to False.
         """
         if sn_to_fit is None and photometry is None:
             raise ValueError("Must specify either a SN object to fit or provide photometry to fit.")
@@ -829,6 +835,9 @@ class SNModel:
 
         gp = GaussianProcessRegressor(kernel=self.kernel, alpha=err, optimizer=None)
         gp.fit(x, y)
+
+        if keep_new_fit:
+            self.surface = gp
 
         ### Predict lightcurves given the GP fit
         if not phase_min:
