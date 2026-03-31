@@ -21,15 +21,18 @@ import re
 # repeat for all objects
 
 def inspect_gp(foldername):
-    files = glob.glob(foldername+"/*")[0:2] #TODO run for all eventually
+    files = glob.glob(foldername+"/*")
     
     with open('searched_files.txt', 'w') as file1:
         with open('good_searched_files.txt', 'w') as file2:
             file1.write("# SN, sample\n")
             file2.write("# SN, sample\n")
+            file1.flush()
+            file2.flush()
 
-            for i,file in enumerate(files):
+            for i,file in enumerate(files): 
                 sn = file[18:-13]
+
                 good_fits = {}
                 
                 # read in GP model 
@@ -39,17 +42,21 @@ def inspect_gp(foldername):
                 data = pd.read_csv(f'../data/SESNe/SNIIb/{sn}/{sn}_datacube_mangled.csv')
                 datadf = data.loc[(data['Nondetection']==False)&((data['Filter']=='g')|(data['Filter']=='r'))&
                                 (data['Phase']>-20)&(data['Phase']<50),
-                                ['Phase', 'Filter', 'ShiftedFlux', 'ShiftedFluxerr']] #TODO change to mag
+                                ['Phase', 'Filter', 'ShiftedMag', 'Magerr']] 
                     #changing df column names to match expected names of fit_photometry function
-                datadf.rename(columns={'ShiftedFluxerr': 'MagErr'}, inplace=True)
-                datadf.rename(columns={'ShiftedFlux': 'Mag'}, inplace=True)
+                datadf.rename(columns={'Magerr': 'MagErr'}, inplace=True)
+
+                if sn in ['SN2022qzr', 'SN2021pb', 'SN2020sbw', 'SN2020rsc', 'SN2020ikq']:
+                    datadf['Mag'] = -1*datadf['ShiftedMag']
+                else:
+                    datadf.rename(columns={'ShiftedMag':'Mag'}, inplace=True)
 
                 gband = (datadf['Filter']=='g')
                 rband = ~gband
                 
                 plt.figure()
                 
-                for s in gp_df['sample'].unique()[0:2]: #TODO run for all
+                for s in gp_df['sample'].unique(): 
                     smol_df = gp_df.loc[(gp_df['sample']==s)]
 
                     gb = (smol_df['filt']=='g')
@@ -77,8 +84,15 @@ def inspect_gp(foldername):
                         good_fits.append(s)
                         file1.write(f"{sn},{s}" + '\n')
                         file2.write(f"{sn},{s}" + '\n')
+                        file1.flush()
+                        file2.flush()
+                    elif like.lower() in ['quit','exit']:
+                        file1.write(f"{sn},{s}" + '\n')
+                        file1.flush()
+                        return good_fits
                     else:
                         file1.write(f"{sn},{s}" + '\n')
+                        file1.flush()
                         continue
     return good_fits
 
