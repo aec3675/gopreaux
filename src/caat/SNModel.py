@@ -508,7 +508,7 @@ class SNModel:
             plt.show()
 
     def predict_photometry_points(
-        self, wavelengths: np.ndarray, phases: np.ndarray, show: bool = True, **kwargs
+        self, wavelengths: np.ndarray, phases: np.ndarray, show: bool = False, **kwargs
     ):
         """
         Predict a series of photometry points given arrays of wavelength and phase.
@@ -529,7 +529,7 @@ class SNModel:
                 in Angstroms.
             phases (np.ndarray): array of phases, in days.
             show (bool, optional): Plot the predicted
-                photometry points. Defaults to True.
+                photometry points. Defaults to False.
 
         Raises:
             ValueError: If any input wavelength values are outside
@@ -571,17 +571,17 @@ class SNModel:
         else:
             template_lc = np.zeros(len(prediction))
 
-        plt.errorbar(
-            phases,
-            prediction + template_lc,
-            yerr=dev,
-            fmt="o",
-            color=kwargs.get("color", "k"),
-        )
-        plt.xlabel("Phase (days)")
-        plt.ylabel("Log10(Flux) Relative to Peak")
-        plt.title("Predicted Photometry Points")
         if show:
+            plt.errorbar(
+                phases,
+                prediction + template_lc,
+                yerr=dev,
+                fmt="o",
+                color=kwargs.get("color", "k"),
+            )
+            plt.xlabel("Phase (days)")
+            plt.ylabel("Log10(Flux) Relative to Peak")
+            plt.title("Predicted Photometry Points")
             plt.show()
 
         return phases, prediction + template_lc, dev
