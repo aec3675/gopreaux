@@ -186,3 +186,153 @@ class TestGP3D:
 
     #     assert len(gaussian_processes) > 0 and len(phase_grid) > 0 and len(kernel_params) > 0 and len(wl_grid) > 0
     #     assert gaussian_processes[0].shape <= (len(phase_grid), len(wl_grid))
+
+    def test_interpolate_grid_fills_nans(self):
+        """interpolate_grid should replace NaNs between valid values (requires >4 valid points)"""
+        # filter_window must be > polyorder (3), so use 5; need >4 non-NaN values per row
+        row = np.array([1.0, 1.5, 2.0, np.nan, 3.0, 3.5, 4.0, 4.5, 5.0], dtype=float)
+        grid = np.vstack([row, row + 1.0])
+        interp_array = np.linspace(0, 1, grid.shape[1])
+        result = self.gp.interpolate_grid(grid.copy(), interp_array, filter_window=5)
+        # The NaN at index 3 is between valid values and should be filled
+        assert not np.isnan(result[0, 3])
+        assert not np.isnan(result[1, 3])
+
+    def test_interpolate_grid_preserves_endpoints(self):
+        """interpolate_grid should leave NaNs outside the range of valid values"""
+        grid = np.array([[np.nan, 1.0, 2.0, np.nan]], dtype=float)
+        interp_array = np.linspace(0, 1, 4)
+        result = self.gp.interpolate_grid(grid.copy(), interp_array, filter_window=3)
+        # Endpoints outside valid data range stay NaN
+        assert np.isnan(result[0, 0])
+        assert np.isnan(result[0, 3])
+
+    def test_interpolate_grid_all_nan_row_unchanged(self):
+        """Rows with all NaNs should remain all NaN"""
+        grid = np.array([[np.nan, np.nan, np.nan]], dtype=float)
+        interp_array = np.linspace(0, 1, 3)
+        result = self.gp.interpolate_grid(grid.copy(), interp_array, filter_window=3)
+        assert np.all(np.isnan(result))
+
+    def test_process_dataset_with_set_to_normalize(self):
+        """_process_dataset with set_to_normalize returns a DataFrame"""
+        with patch("caat.GP.GP._process_dataset", Mock(
+            return_value=(
+                np.asarray([0.5, 3.5]),
+                np.asarray([-1.0, 3.0]),
+                np.asarray([0.1, 0.1]),
+                np.asarray([3.5, 3.5])
+            )
+        )):
+            template_df = self.gp._process_dataset(
+                set_to_normalize=self.gp.set_to_normalize
+            )
+        assert isinstance(template_df, pd.DataFrame)
+        assert set(template_df.columns) >= {"Phase", "Wavelength", "Mag", "MagErr"}
+
+    def test_build_samples_returns_empty_arrays_when_no_data(self):
+        """_build_samples should return empty arrays when _process_dataset returns nothing"""
+        with patch("caat.GP.GP._process_dataset", Mock(
+            return_value=(
+                np.asarray([]),
+                np.asarray([]),
+                np.asarray([]),
+                np.asarray([])
+            )
+        )):
+            phases, wls, mags, err_grid = self.gp._build_samples('B')
+
+        assert len(phases) == 0
+        assert len(wls) == 0
+        assert len(mags) == 0
+        assert len(err_grid) == 0
+
+    def test_build_test_wavelength_phase_grid_returns_empty_when_no_phases_in_range(
+        self, mock_datacube
+    ):
+        """Returns empty lists when no phases in the grid match the measured phases"""
+        # Put measured phases far outside the wl_grid range
+        measured_phases = np.asarray([100.0, 101.0])  # >> phase_grid max
+        result = self.gp._build_test_wavelength_phase_grid_from_photometry(
+            mock_datacube["LogShiftedWavelength"].values,
+            measured_phases,
+            self.wl_grid,
+            self.phase_grid,
+        )
+        x, y, wl_inds_fitted, phase_inds_fitted, min_phase = result
+        assert len(x) == 0
+        assert len(y) == 0
+        assert min_phase is None
+
+    def test_sample_predicted_sed_shape(self):
+        """_sample_predicted_sed returns array with same shape as input"""
+        mean = np.random.random((10, 5))
+        std = np.random.random((10, 5)) * 0.1
+        result = self.gp._sample_predicted_sed(mean, std)
+        assert result.shape == mean.shape
+
+    def test_sample_predicted_sed_within_bounds(self):
+        """Sampled SED should be within ±1 sigma of the mean"""
+        mean = np.zeros((20, 20))
+        std = np.ones((20, 20))
+        result = self.gp._sample_predicted_sed(mean, std)
+        assert np.all(result >= mean - std)
+        assert np.all(result <= mean + std)
+
+    def test_smooth_predicted_model_shape_preserved(self):
+        """_smooth_predicted_model should preserve the shape of the input array"""
+        model = np.random.random((5, 10))
+        result = self.gp._smooth_predicted_model(model, window_size=3)
+        assert result.shape == model.shape
+
+    def test_smooth_predicted_model_transpose(self):
+        """_smooth_predicted_model with transpose=True should still return original shape"""
+        model = np.random.random((5, 10))
+        result = self.gp._smooth_predicted_model(model, window_size=3, transpose=True)
+        assert result.shape == model.shape
+
+    def test_smooth_predicted_model_even_window_becomes_odd(self):
+        """Even window_size should be incremented to odd without raising an error"""
+        model = np.random.random((4, 8))
+        result = self.gp._smooth_predicted_model(model, window_size=4)
+        assert result.shape == model.shape
+
+    def test_optimize_hyperparams_raises_without_subtract_flag(self):
+        """optimize_hyperparams should raise when neither subtract flag is set"""
+        with patch("caat.GP3D.GP3D._process_dataset", Mock(return_value=pd.DataFrame(
+            {"Phase": [], "Wavelength": [], "Mag": [], "MagErr": []}
+        ))):
+            with pytest.raises(Exception, match=r'Must toggle either .*'):
+                self.gp.optimize_hyperparams()
+
+    def test_subtract_data_from_grid_skips_nan_grid_values(self, mock_sn):
+        """Residuals for data points where mag_grid is NaN should be skipped"""
+        nan_mag_grid = np.full(
+            (len(self.phase_grid), len(self.wl_grid)), np.nan
+        )
+        residuals = self.gp._subtract_data_from_grid(
+            mock_sn,
+            ['B'],
+            self.phase_grid,
+            self.wl_grid,
+            nan_mag_grid,
+            np.ones((len(self.phase_grid), len(self.wl_grid))) * 0.01,
+        )
+        assert isinstance(residuals, pd.DataFrame)
+        assert len(residuals) == 0
+
+    def test_subtract_data_from_grid_columns(self, mock_sn):
+        """Residuals DataFrame should contain the expected columns"""
+        mag_grid = np.random.random((len(self.phase_grid), len(self.wl_grid)))
+        residuals = self.gp._subtract_data_from_grid(
+            mock_sn,
+            ['B'],
+            self.phase_grid,
+            self.wl_grid,
+            mag_grid,
+            np.ones((len(self.phase_grid), len(self.wl_grid))) * 0.01,
+        )
+        assert isinstance(residuals, pd.DataFrame)
+        if len(residuals) > 0:
+            expected_cols = {"Filter", "Phase", "Wavelength", "MagResidual", "MagErr", "Mag", "Nondetection"}
+            assert expected_cols <= set(residuals.columns)
