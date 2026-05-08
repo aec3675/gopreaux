@@ -57,7 +57,7 @@ class SurfaceArray:
 
         self.phase_grid = phase_grid
         self.wl_grid = wl_grid
-        self.kernel = kernel
+        self.kernel_ = kernel
 
     def predict(self, input: np.ndarray, return_std: bool = False):
         """
@@ -157,14 +157,13 @@ class SNModel:
 
             if sn:
                 self.sn = sn
-                self._initialize_surface_fit()
             if sncollection:
                 self.collection = sncollection
             if norm_set:
                 self.norm_set = norm_set
 
             self.surface = surface
-            self.kernel = surface.kernel
+            self.kernel = surface.kernel_
             self.template = template_mags
 
             if (
@@ -335,7 +334,7 @@ class SNModel:
             norm_set_names = hdul[0].header["NORM_SET"]
 
             try:
-                self.kernel = surface.kernel
+                self.kernel = surface.kernel_
             except:
                 print("No Kernel, need to implement")
 
