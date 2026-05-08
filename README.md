@@ -1,7 +1,7 @@
-<big><center><b>GOPREAUX</b></center>
-<center><i>Gaussian process Optimized Photometric Regression of Extragalactic Archival Ultraviolet-infrared eXplosions</i></center></big>
-<br>
-A package for multi-dimensional Gaussian Process Regression of extragalactic astronomical transient light curves, enabling a full characterization of their spectral energy distribution evolution with time. 
+# GOPREAUX
+***Gaussian process Optimized Photometric Regression of Extragalactic Archival Ultraviolet-infrared eXplosions***
+
+A package for multi-dimensional Gaussian Process Regression of extragalactic astronomical transient light curves, enabling a full characterization of their spectral energy distribution evolution with time.
 
 ## Background
 Time-domain astronomy is entering a golden age of discovery, powered by wide-field surveys such as Rubin Observatory's Legacy Survey of Space and Time. The wealth of data that will be produced over the coming years offers time-domain astronomers the opportunity to conduct population-level studies of different types of explosive extragalactic transients, many for the first time. However, our knowledge of the physics underpinning these explosions is lagging, and parsing the deluge of data in real time to identify interesting transients requires detailed knowledge of their time evolution.

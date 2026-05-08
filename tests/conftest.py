@@ -46,7 +46,10 @@ def mock_datacube() -> pd.DataFrame:
 @pytest.fixture
 def mock_sn(mock_data, mock_datacube) -> SN:
     sn = SN(
-        data=mock_data
+        name="mock_sn",
+        data=mock_data,
+        type="SN",
+        subtype="Ia",
     )
     sn.cube = mock_datacube
     
