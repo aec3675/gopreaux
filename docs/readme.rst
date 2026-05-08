@@ -53,4 +53,26 @@ Citations
 ----------------------
 
 If your work makes use of the `GOPREAUX` software or data reductions, please cite 
-our paper in prep: C. Pellegrino et al. (2026, in prep.).
+our paper which is available on the arXiv:
+
+
+.. code-block::
+
+    @ARTICLE{2026arXiv260403372P,
+        author = {{Pellegrino}, C. and {Pritchard}, T.~A. and {Modjaz}, M. and {Crawford}, A. and {Khakpash}, S. and {Bianco}, F.},
+            title = "{GOPREAUX I: Open-source Code and Data to Model Multi-wavelength Emission of Extragalactic Transients using Gaussian Processes}",
+        journal = {arXiv e-prints},
+        keywords = {Instrumentation and Methods for Astrophysics, High Energy Astrophysical Phenomena},
+            year = 2026,
+            month = apr,
+            eid = {arXiv:2604.03372},
+            pages = {arXiv:2604.03372},
+            doi = {10.48550/arXiv.2604.03372},
+    archivePrefix = {arXiv},
+        eprint = {2604.03372},
+    primaryClass = {astro-ph.IM},
+        adsurl = {https://ui.adsabs.harvard.edu/abs/2026arXiv260403372P},
+        adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+    }
+
+as well as the sources of any data used in your analysis.
