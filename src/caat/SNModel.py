@@ -826,9 +826,7 @@ class SNModel:
 
         ### Fit the photometry with the GP model
         err = residuals["MagErr"].values
-        phases_to_fit = np.log(
-            residuals["Phase"].values + self.log_transform
-        )
+        phases_to_fit = np.log(residuals["Phase"].values - residuals["Phase"].min() + 0.1)
         x = np.vstack((phases_to_fit, np.log10(residuals["Wavelength"].values))).T
         y = residuals["MagResidual"].values
 
@@ -847,7 +845,7 @@ class SNModel:
         _, ax = plt.subplots()
         for filt in list(set(residuals["Filter"].values)):
             test_times_linear = np.arange(phase_min, phase_max, 1.0 / 24)
-            test_times = np.log(test_times_linear + self.log_transform)
+            test_times = np.log(test_times_linear - test_times_linear.min() + 0.1)
             test_waves = np.ones(len(test_times)) * np.log10(WLE[filt])
 
             wl_ind = np.argmin(abs(self.wl_grid - WLE[filt]))
@@ -866,7 +864,7 @@ class SNModel:
                     np.vstack((test_times, test_waves)).T, n_samples=nsamples
                 )
 
-            test_times = np.exp(test_times) - self.log_transform
+            test_times = np.exp(test_times) + min(test_times_linear) - 0.1
             residuals_for_filt = residuals[residuals["Filter"] == filt]
 
             if nsamples == 1:
