@@ -10,6 +10,7 @@ from scipy.interpolate import RegularGridInterpolator
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel
 from itertools import chain
+from matplotlib.ticker import AutoMinorLocator
 
 from caat.utils import ROOT_DIR, WLE, colors, convert_shifted_fluxes_to_shifted_mags
 
@@ -652,6 +653,9 @@ class SNModel:
         show: bool = False,
         nsamples: int = 1,
         keep_new_fit: bool = False,
+        plot4adrian: bool = False,
+        plot4adrian_df: dict | pd.DataFrame = None,
+        plot4adrian_savepath = None,
     ):
         """
         Fit photometry of an input SN using the GaussianProcessRegressor model.
@@ -698,7 +702,8 @@ class SNModel:
                 photometry = pd.DataFrame(photometry)
             except Exception as e:
                 raise ValueError(
-                    "The input min/max phase must be within the phase bounds of the GP model"
+                    "Either provide photometry as a DataFrame or in a valid dictionary",
+                    e,
                 )
 
         if (
@@ -860,7 +865,16 @@ class SNModel:
         if not phase_max:
             phase_max = max(residuals["Phase"].values)
 
-        _, ax = plt.subplots()
+        if not plot4adrian:
+            _, ax = plt.subplots()
+        else:
+            if sn_to_fit.name=='SN2020sbw':
+                fig = plt.figure(figsize=(11,6))
+                ax = fig.add_subplot(111)
+            else:
+                fig = plt.figure(figsize=(8.25,6))
+                ax = fig.add_subplot(111)
+
         for filt in list(set(residuals["Filter"].values)):
             test_times_linear = np.arange(phase_min, phase_max, 1.0 / 24)
             test_times = np.log(test_times_linear - test_times_linear.min() + 0.1)
@@ -889,35 +903,71 @@ class SNModel:
                 residuals_for_filt["Phase"] = np.log(
                     residuals_for_filt["Phase"].values + self.log_transform
                 )
+                if plot4adrian:
+                    sn = sn_to_fit
 
-                Plot().plot_run_gp_overlay(
-                    ax=ax,
-                    test_times=test_times,
-                    test_prediction=test_prediction,
-                    std_prediction=std_prediction,
-                    template_mags=template_mags,
-                    residuals=residuals_for_filt,
-                    log_transform=self.log_transform,
-                    filt=filt,
-                    sn=sn_to_fit,
-                )
-            else:
-                for sample in samples.T:
-                    log_fluxes = sample + template_mags
+                    # Convert between log fluxes to shifted magnitudes
+                    log_fluxes = test_prediction + template_mags
                     shifted_mags = convert_shifted_fluxes_to_shifted_mags(
-                        log_fluxes, sn_to_fit, sn_to_fit.zps[filt]
+                        log_fluxes, sn, sn.zps[filt]
+                    )
+                    shifted_mags_lower_unc = convert_shifted_fluxes_to_shifted_mags(
+                        log_fluxes - 1.96 * std_prediction, sn, sn.zps[filt]
+                    )
+                    shifted_mags_upper_unc = convert_shifted_fluxes_to_shifted_mags(
+                        log_fluxes + 1.96 * std_prediction, sn, sn.zps[filt]
                     )
 
-                test_times = np.exp(test_times) - self.log_transform
-                residuals_for_filt = residuals[residuals["Filter"] == filt]
-
-                if nsamples == 1:
-                    residuals_for_filt["Phase"] = np.log(
-                        residuals_for_filt["Phase"].values + self.log_transform
+                    ax.plot(
+                        test_times,
+                        shifted_mags,
+                        label=f'GP model: {filt}',
+                        color=colors.get(filt, "k"),
+                        zorder=2,
+                        linewidth=4
+                        )
+                    ax.fill_between(
+                            test_times,
+                            shifted_mags_lower_unc,
+                            shifted_mags_upper_unc,
+                            alpha=0.2,
+                            color=colors.get(filt, "k"),
+                            zorder=1
+                        )  
+                    if filt=='g':
+                        color='teal'
+                        gpcolor='cyan'
+                    elif filt=='r':
+                        color='tomato'
+                        gpcolor='orange'
+                    else:
+                        color=colors.get(filt, "k")
+                    
+                    ax.errorbar(
+                        np.exp(residuals_for_filt["Phase"].values) - self.log_transform,
+                        residuals_for_filt["Mag"].values,
+                        yerr=residuals_for_filt["MagErr"].values,
+                        ls='', marker='.',color=color, alpha=0.6, markersize=20,zorder=0,label=f'ZTF-{filt}'
                     )
-                    ax.set_xlabel("Normalized Time [days]")
-                    ax.set_ylabel("Flux Relative to Peak")
 
+                    #fake photometry
+                    ax.errorbar(plot4adrian_df.loc[plot4adrian_df['filt']==filt,'time'], 
+                                plot4adrian_df.loc[plot4adrian_df['filt']==filt,'flux_rand'],
+                                yerr=plot4adrian_df.loc[plot4adrian_df['filt']==filt,'flux_err'],
+                                markerfacecolor=gpcolor, markeredgecolor='k', ecolor=gpcolor, ls='',ms=28,marker='.',label=f'GP-{filt}')
+                    
+                    ax.xaxis.set_minor_locator(AutoMinorLocator())
+                    ax.yaxis.set_minor_locator(AutoMinorLocator())
+                    if sn.name!='SN2020ikq':
+                        ax.set_xticks([-20,0,20,40])
+                    else:
+                        ax.set_xticks([0,10,20,30,40,50])
+                    ax.tick_params(axis='both', which='both', direction='in')
+
+                    ax.set_xlabel('Phase [days]', fontsize=30)
+                    ax.set_ylabel('Relative Magnitude', fontsize=30)
+                
+                else:
                     Plot().plot_run_gp_overlay(
                         ax=ax,
                         test_times=test_times,
@@ -928,34 +978,48 @@ class SNModel:
                         log_transform=self.log_transform,
                         filt=filt,
                         sn=sn_to_fit,
+                        plot4adrian=plot4adrian,
+                        plot4adrian_df=plot4adrian_df,
                     )
-                else:
-                    for sample in samples.T:
-                        log_fluxes = sample + template_mags
-                        shifted_mags = convert_shifted_fluxes_to_shifted_mags(
-                            log_fluxes, sn_to_fit, sn_to_fit.zps[filt]
-                        )
+            else:
+                for sample in samples.T:
+                    log_fluxes = sample + template_mags
+                    shifted_mags = convert_shifted_fluxes_to_shifted_mags(
+                        log_fluxes, sn_to_fit, sn_to_fit.zps[filt]
+                    )
 
-                        ax.plot(
-                            test_times, shifted_mags, color=colors.get(filt, "k"), alpha=0.2
-                        )
-                        ax.errorbar(
-                            residuals_for_filt["Phase"].values,
-                            residuals_for_filt["Mag"].values,
-                            yerr=residuals_for_filt["MagErr"].values,
-                            fmt="o",
-                            color=colors.get(filt, "k"),
-                            mec="k",
-                        )
-            handles, labels = ax.get_legend_handles_labels()
-            by_label = dict(zip(labels, handles))
-            ax.legend(by_label.values(), by_label.keys())
-            ax.set_xlabel("Normalized Time [days]")
-            ax.set_ylabel("Flux Relative to Peak")
-            ax.set_title(sn_to_fit.name)
+                    ax.plot(
+                        test_times, shifted_mags, color=colors.get(filt, "k"), alpha=0.2
+                    )
+                    ax.errorbar(
+                        residuals_for_filt["Phase"].values,
+                        residuals_for_filt["Mag"].values,
+                        yerr=residuals_for_filt["MagErr"].values,
+                        fmt="o",
+                        color=colors.get(filt, "k"),
+                        mec="k",
+                    )
+                ax.set_xlabel("Normalized Time [days]")
+                ax.set_ylabel("Flux Relative to Peak")
 
-            if show:
-                plt.show()
+        if show:
+            if plot4adrian:
+                sn = sn_to_fit
+                if sn.name=='SN2020sbw':
+                    ax.annotate(f"{sn}", xy=(0.645,0.91), xycoords='axes fraction', fontsize=28, color='dimgray')
+                elif sn.name=='SN2020ikq':
+                    ax.annotate(f"{sn}", xy=(0.665,0.91), xycoords='axes fraction', fontsize=28, color='dimgray')
+                elif sn.name=='SN2020adnx':
+                    ax.annotate(f"{sn}", xy=(0.615,0.91), xycoords='axes fraction', fontsize=28, color='dimgray')
+
+                if sn.name=='SN2020sbw':
+                        handles, labels = plt.gca().get_legend_handles_labels()
+                        desired_order = ['ZTF-g', 'ZTF-r', 'GP model: g', 'GP model: r', 'GP-g', 'GP-r']
+                        order = [labels.index(l) for l in desired_order]
+                        plt.legend([handles[i] for i in order], [labels[i] for i in order],bbox_to_anchor=(0.98, 0.57), frameon=False)
+                plt.tight_layout()
+                plt.savefig(f'fake_LCs/rand_added/lc_overlays/{sn}_w_gp_median.png', dpi=300, bbox_inches='tight')
+            plt.show()
 
 ###############################
 

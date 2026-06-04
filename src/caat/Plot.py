@@ -427,6 +427,8 @@ class Plot:
         log_transform,
         filt,
         sn=None,
+        plot4adrian=False,
+        plot4adrian_df=None,
     ):
         if sn is not None:
             # Convert between log fluxes to shifted magnitudes
@@ -440,25 +442,41 @@ class Plot:
             shifted_mags_upper_unc = convert_shifted_fluxes_to_shifted_mags(
                 log_fluxes + 1.96 * std_prediction, sn, sn.zps[filt]
             )
-
-            ax.plot(
-                test_times,
-                shifted_mags,
-                label=filt,
-                color=colors.get(filt, "k"),
-            )
-            ax.fill_between(
-                test_times,
-                shifted_mags_lower_unc,
-                shifted_mags_upper_unc,
-                alpha=0.2,
-                color=colors.get(filt, "k"),
-            )
+            if not plot4adrian:
+                ax.plot(
+                    test_times,
+                    shifted_mags,
+                    label=filt,
+                    color=colors.get(filt, "k"),
+                )
+                ax.fill_between(
+                    test_times,
+                    shifted_mags_lower_unc,
+                    shifted_mags_upper_unc,
+                    alpha=0.2,
+                    color=colors.get(filt, "k"),
+                )
+            else:
+                ax.plot(
+                    test_times,
+                    shifted_mags,
+                    label=filt,
+                    color=colors.get(filt, "k"),
+                    zorder=1
+                )
+                ax.fill_between(
+                    test_times,
+                    shifted_mags_lower_unc,
+                    shifted_mags_upper_unc,
+                    alpha=0.2,
+                    color=colors.get(filt, "k"),
+                    zorder=1
+                )
         else:
             ax.plot(
                 test_times,
                 test_prediction + template_mags,
-                label=filt,
+                label=f'GP model: {filt}',
                 color=colors.get(filt, "k"),
             )
             ax.fill_between(
@@ -469,20 +487,70 @@ class Plot:
                 color=colors.get(filt, "k"),
             )
 
-        ax.errorbar(
-            np.exp(residuals["Phase"].values) - log_transform,
-            residuals["Mag"].values,
-            yerr=residuals["MagErr"].values,
-            fmt="o",
-            color=colors.get(filt, "k"),
-            mec="k",
-        )
+        if not plot4adrian:
+            ax.errorbar(
+                np.exp(residuals["Phase"].values) - log_transform,
+                residuals["Mag"].values,
+                yerr=residuals["MagErr"].values,
+                fmt="o",
+                color=colors.get(filt, "k"),
+                mec="k",
+            )
 
-        ax.set_xlabel("Normalized Time [days]")
-        ax.set_ylabel("Flux Relative to Peak")
-        if sn is not None:
-            plt.title(sn.name)
-        plt.legend()
+            ax.set_xlabel("Normalized Time [days]")
+            ax.set_ylabel("Flux Relative to Peak")
+            if sn is not None:
+                plt.title(sn.name)
+            plt.legend()
+        else:
+            if filt=='g':
+                color='teal'
+            elif filt=='r':
+                color='tomato'
+            else:
+                color=colors.get(filt, "k")
+            
+            ax.errorbar(
+                np.exp(residuals["Phase"].values) - log_transform,
+                residuals["Mag"].values,
+                yerr=residuals["MagErr"].values,
+                ls='', marker='.',color=color, alpha=0.6, markersize=15,zorder=0,label=f'ZTF-{filt}'
+            )
+
+            #fake photometry
+            ax.errorbar(plot4adrian_df.loc[plot4adrian_df['filt']=='g','time'], 
+                        plot4adrian_df.loc[plot4adrian_df['filt']=='g','flux_rand'],
+                        yerr=plot4adrian_df.loc[plot4adrian_df['filt']=='g','flux_err'],
+                        markerfacecolor='cyan', markeredgecolor='k', ecolor='cyan', ls='',ms=28,marker='.',label='GP-g')
+            ax.errorbar(plot4adrian_df.loc[plot4adrian_df['filt']=='r', 'time'], 
+                        plot4adrian_df.loc[plot4adrian_df['filt']=='r', 'flux_rand'],
+                        yerr=plot4adrian_df.loc[plot4adrian_df['filt']=='r','flux_err'], 
+                        markerfacecolor='orange', markeredgecolor='k', ecolor='orange', ls='',ms=28,marker='.',label='GP-r')
+
+            if sn.name!='SN2020ikq':
+                ax.set_xticks([-20,0,20,40])
+            else:
+                ax.set_xticks([-10,0,20,40])
+            ax.tick_params(axis='both', direction='in')
+
+            ax.set_xlabel('Phase [days]', fontsize=30)
+            ax.set_ylabel('Relative Magnitude', fontsize=30)
+
+            if sn.name=='SN2020sbw':
+                plt.annotate(f"{sn}", xy=(0.645,0.91), xycoords='axes fraction', fontsize=28, color='dimgray')
+            elif sn.name=='SN2020ikq':
+                plt.annotate(f"{sn}", xy=(0.665,0.91), xycoords='axes fraction', fontsize=28, color='dimgray')
+            elif sn.name=='SN2020adnx':
+                plt.annotate(f"{sn}", xy=(0.615,0.91), xycoords='axes fraction', fontsize=28, color='dimgray')
+
+            # if sn.name=='SN2020sbw':
+            #     handles, labels = plt.gca().get_legend_handles_labels()
+            #     desired_order = ['ZTF-g', 'ZTF-r', 'GP model: g', 'GP model: r', 'GP-g', 'GP-r']
+            #     order = [labels.index(l) for l in desired_order]
+            #     plt.legend([handles[i] for i in order], [labels[i] for i in order],bbox_to_anchor=(0.98, 0.57), frameon=False)
+        
+
+            # plt.legend()
 
     def plot_run_gp_surface(self, gp_class, x, y, test_prediction_reshaped):
         fig = plt.figure()
